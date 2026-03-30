@@ -49,6 +49,15 @@ class InterviewCreate(BaseModel):
     question_count: int | None = Field(default=None, ge=1, le=20)
 
 
+class InterviewUpdate(BaseModel):
+    candidate_id: int | None = None
+    role_id: int | None = None
+    custom_role: str | None = None
+    skills: str | None = None
+    status: str | None = None
+    finished_at: datetime | None = None
+
+
 class InterviewQuestionRead(BaseModel):
     id: int
     question_id: int | None = None
@@ -102,6 +111,60 @@ class InterviewDetail(BaseModel):
     finished_at: datetime | None = None
     questions: list[InterviewQuestionRead] = []
     answers: list[AnswerRead] = []
+
+    class Config:
+        from_attributes = True
+
+
+class TranscriptItem(BaseModel):
+    interview_question_id: int
+    question_text: str
+    transcript: str
+    score: int | None = None
+    feedback: str | None = None
+    created_at: datetime
+
+
+class InterviewTranscript(BaseModel):
+    id: int
+    candidate: CandidateRead
+    role: RoleRead | None = None
+    custom_role: str | None = None
+    skills: str | None = None
+    status: str
+    started_at: datetime
+    finished_at: datetime | None = None
+    transcripts: list[TranscriptItem] = []
+
+    class Config:
+        from_attributes = True
+
+
+class InterviewSessionState(BaseModel):
+    interview_id: int
+    status: str
+    question: InterviewQuestionRead | None = None
+    is_complete: bool
+
+
+class InterviewSessionAnswer(BaseModel):
+    answer: AnswerRead
+    next_question: InterviewQuestionRead | None = None
+    is_complete: bool
+    status: str
+
+
+class UserCreate(BaseModel):
+    username: str
+    password: str
+    role: str | None = None
+
+
+class UserRead(BaseModel):
+    id: int
+    username: str
+    role: str
+    created_at: datetime
 
     class Config:
         from_attributes = True

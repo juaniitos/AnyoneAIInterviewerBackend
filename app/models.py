@@ -79,3 +79,13 @@ class Answer(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     interview_question = relationship("InterviewQuestion", back_populates="answers")
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    username: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    role: Mapped[str] = mapped_column(String(30), default="recruiter")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

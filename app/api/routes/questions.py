@@ -2,8 +2,13 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 from app.api.deps import get_db
 from app import models, schemas
+from app.security.rbac import require_roles
 
-router = APIRouter(prefix="/questions", tags=["questions"])
+router = APIRouter(
+    prefix="/questions",
+    tags=["questions"],
+    dependencies=[Depends(require_roles("admin"))],
+)
 
 
 @router.post("", response_model=schemas.QuestionRead, status_code=status.HTTP_201_CREATED)
