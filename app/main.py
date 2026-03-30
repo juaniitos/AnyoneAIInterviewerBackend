@@ -1,4 +1,5 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
 from app.core.config import settings
 from app.db.session import engine
 from app.db.base import Base
@@ -11,7 +12,10 @@ def create_app() -> FastAPI:
 
     @app.middleware("http")
     async def auth_middleware(request, call_next):
-        await authenticate_request(request)
+        try:
+            await authenticate_request(request)
+        except HTTPException as exc:
+            return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
         return await call_next(request)
 
     app.include_router(roles.router)
