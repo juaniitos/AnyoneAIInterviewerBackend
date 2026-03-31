@@ -23,6 +23,62 @@ export $(grep -v '^#' .env.example | xargs)
 uvicorn app.main:app --reload
 ```
 
+## Auth Quickstart
+You can authenticate in **one of two ways**:
+
+1) **API Key** (header-based)
+2) **JWT Bearer Token** (issued via `/auth/login`)
+
+### API Key (header)
+API keys are defined in the `API_KEYS` env var. Example:
+```
+API_KEYS=dev_admin_key:admin,dev_recruiter_key:recruiter,dev_interviewer_key:interviewer
+```
+Use one of these keys:
+```bash
+curl -H "X-API-Key: dev_admin_key" http://localhost:8000/roles
+```
+
+### JWT (login + refresh)
+JWT login uses `USER_CREDENTIALS` and expects **email + password**.
+Example credentials:
+```
+USER_CREDENTIALS=admin:adminpass:admin,recruiter:recruitpass:recruiter,interviewer:intpass:interviewer
+```
+
+Login:
+```bash
+curl -X POST http://localhost:8000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin","password":"adminpass"}'
+```
+
+Use the access token:
+```bash
+curl -H "Authorization: Bearer <access_token>" http://localhost:8000/interviews
+```
+
+Refresh:
+```bash
+curl -X POST http://localhost:8000/auth/refresh \
+  -H "Content-Type: application/json" \
+  -d '{"refresh_token":"<refresh_token>"}'
+```
+
+### Sign up (Admin users)
+`/auth/signup` creates an **AdminUser** with a hashed password.
+By default it is **public** (no API key required).
+
+Signup:
+```bash
+curl -X POST http://localhost:8000/auth/signup \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin2@example.com","password":"securepass","name":"Admin Two"}'
+```
+
+If you want to **require an API key** for signup, remove `/auth/signup` from the public paths in:
+`app/security/auth.py`
+
 Open API docs:
 - http://localhost:8000/docs
 
@@ -44,18 +100,61 @@ docker compose up --build
 - `JWT_REFRESH_DAYS` (default: `7`)
 
 ## Auth + RBAC
-All endpoints (except `/health`, `/docs`, `/redoc`, `/openapi.json`) require an API key header.
-JWT auth is also supported via `Authorization: Bearer <token>`.
+All endpoints (except `/health`, `/docs`, `/redoc`, `/openapi.json`, `/auth/login`, `/auth/refresh`, `/auth/signup`) require auth.
+You can authenticate in **either** of these ways:
+
+1) **API Key** (header-based)
+2) **JWT Bearer Token** (issued via `/auth/login`)
 
 Built-in roles:
 - `admin` can access everything.
 - `recruiter` can manage candidates and interviews.
 - `interviewer` can run interview sessions and submit answers.
 
-Example:
-```bash
-curl -H "X-API-Key: your_key_here" http://localhost:8000/interviews
+### API Key auth
+API keys are defined in the `API_KEYS` env var. Example:
 ```
+API_KEYS=dev_admin_key:admin,dev_recruiter_key:recruiter,dev_interviewer_key:interviewer
+```
+Pick **one key** from that list and send it as a header:
+```bash
+curl -H "X-API-Key: dev_admin_key" http://localhost:8000/roles
+```
+
+### JWT auth (login + refresh)
+Login uses the `USER_CREDENTIALS` env var and expects **email + password**:
+```
+USER_CREDENTIALS=admin:adminpass:admin,recruiter:recruitpass:recruiter,interviewer:intpass:interviewer
+```
+
+Login:
+```bash
+curl -X POST http://localhost:8000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin","password":"adminpass"}'
+```
+
+Use the access token:
+```bash
+curl -H "Authorization: Bearer <access_token>" http://localhost:8000/interviews
+```
+
+Refresh:
+```bash
+curl -X POST http://localhost:8000/auth/refresh \
+  -H "Content-Type: application/json" \
+  -d '{"refresh_token":"<refresh_token>"}'
+```
+
+### Sign up (Admin users)
+`/auth/signup` is public (no API key required). It creates an **AdminUser** with a hashed password:
+```bash
+curl -X POST http://localhost:8000/auth/signup \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin2@example.com","password":"securepass","name":"Admin Two"}'
+```
+
+If you are still being asked for an API key on `/auth/signup`, redeploy the latest code or make sure `AUTH_ENABLED` is `true` and the service has the updated public path list.
 
 ## API Overview
 - `POST /roles`
@@ -64,6 +163,9 @@ curl -H "X-API-Key: your_key_here" http://localhost:8000/interviews
 - `GET /questions`
 - `POST /candidates`
 - `GET /candidates`
+- `POST /templates`
+- `GET /templates`
+- `GET /templates/{template_id}`
 - `POST /interviews`
 - `GET /interviews`
 - `GET /interviews/{interview_id}`
@@ -85,25 +187,30 @@ curl -H "X-API-Key: your_key_here" http://localhost:8000/interviews
 
 ## Example Flow
 ```bash
-# Create role
+# Create job role
 curl -X POST http://localhost:8000/roles \
   -H "Content-Type: application/json" \
-  -d '{"name":"ML Engineer","description":"Machine Learning Engineer"}'
+  -d '{"name":"ML Engineer","description":"Machine Learning Engineer","seniority":"mid","department":"AI"}'
 
 # Add a question
 curl -X POST http://localhost:8000/questions \
   -H "Content-Type: application/json" \
-  -d '{"role_id":1,"text":"Explain bias-variance tradeoff.","category":"technical"}'
+  -d '{"job_role_id":"ROLE_UUID","text":"Explain bias-variance tradeoff.","category":"technical","difficulty":"medium"}'
+
+# Create template
+curl -X POST http://localhost:8000/templates \
+  -H "Content-Type: application/json" \
+  -d '{"job_role_id":"ROLE_UUID","name":"Default","question_count":5,"system_prompt":"..."}'
 
 # Create candidate
 curl -X POST http://localhost:8000/candidates \
   -H "Content-Type: application/json" \
-  -d '{"first_name":"Ana","last_name":"Lopez","email":"ana@example.com"}'
+  -d '{"full_name":"Ana Lopez","email":"ana@example.com"}'
 
-# Start interview with predefined role
+# Start interview session
 curl -X POST http://localhost:8000/interviews \
   -H "Content-Type: application/json" \
-  -d '{"candidate_id":1,"role_id":1}'
+  -d '{"candidate_id":"CANDIDATE_UUID","job_role_id":"ROLE_UUID","template_id":"TEMPLATE_UUID"}'
 ```
 
 ## Notes

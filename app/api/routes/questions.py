@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.api.deps import get_db
 from app import models, schemas
@@ -13,7 +13,17 @@ router = APIRouter(
 
 @router.post("", response_model=schemas.QuestionRead, status_code=status.HTTP_201_CREATED)
 def create_question(payload: schemas.QuestionCreate, db: Session = Depends(get_db)):
-    question = models.QuestionBank(role_id=payload.role_id, text=payload.text, category=payload.category)
+    job_role = db.query(models.JobRole).filter(models.JobRole.id == payload.job_role_id).first()
+    if not job_role:
+        raise HTTPException(status_code=404, detail="Job role not found")
+    question = models.Question(
+        job_role_id=payload.job_role_id,
+        text=payload.text,
+        category=payload.category,
+        difficulty=payload.difficulty,
+        embedding=payload.embedding,
+        is_active=payload.is_active if payload.is_active is not None else True,
+    )
     db.add(question)
     db.commit()
     db.refresh(question)
@@ -21,8 +31,8 @@ def create_question(payload: schemas.QuestionCreate, db: Session = Depends(get_d
 
 
 @router.get("", response_model=list[schemas.QuestionRead])
-def list_questions(role_id: int | None = None, db: Session = Depends(get_db)):
-    query = db.query(models.QuestionBank)
-    if role_id:
-        query = query.filter(models.QuestionBank.role_id == role_id)
-    return query.order_by(models.QuestionBank.id).all()
+def list_questions(job_role_id: str | None = None, db: Session = Depends(get_db)):
+    query = db.query(models.Question)
+    if job_role_id:
+        query = query.filter(models.Question.job_role_id == job_role_id)
+    return query.order_by(models.Question.id).all()
