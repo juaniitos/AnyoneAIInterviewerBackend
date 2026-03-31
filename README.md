@@ -184,6 +184,7 @@ If you are still being asked for an API key on `/auth/signup`, redeploy the late
 - `POST /auth/login`
 - `POST /auth/refresh`
 - `POST /auth/signup`
+- `WS /ws/interviews/{session_id}`
 
 ## Example Flow
 ```bash
@@ -220,3 +221,36 @@ curl -X POST http://localhost:8000/interviews \
   Replace with LLM integrations when ready.
 - SQLite is used for fast iteration. Swap to Postgres by updating `DATABASE_URL`.
 - Database schema lives in `app/models.py` and is created on startup.
+
+## WebSocket Audio Streaming
+Use `WS /ws/interviews/{session_id}` to stream audio from the client and optionally receive audio back.
+
+Auth: same as HTTP (API key or JWT). You can pass credentials as headers or query params:
+- Header: `X-API-Key: <key>` or `Authorization: Bearer <token>`
+- Query: `?api_key=<key>` or `?token=<jwt>`
+
+Client message flow (JSON text + binary):
+1) Send JSON start:
+```json
+{"type":"start","question_id":"QUESTION_UUID","content_type":"audio/webm"}
+```
+2) Send binary audio chunks (raw bytes).
+3) Send JSON end:
+```json
+{"type":"end","transcript":"optional text","audio_duration_sec":12.3,"stt_confidence":0.97}
+```
+
+Server response:
+- `{"type":"ready"}`
+- `{"type":"saved","answer_id":"...","audio_url":"/tmp/interview-audio/..."}`
+
+Playback (server → client):
+```json
+{"type":"playback","question_id":"QUESTION_UUID"}
+```
+Server will emit `audio_start`, raw binary chunks, then `audio_end`.
+
+Note: audio files are stored on disk at `/tmp/interview-audio` by default (ephemeral on Render).
+You can override the folder with `AUDIO_UPLOAD_DIR`.
+
+Swagger note: OpenAPI/Swagger does **not** list WebSocket routes, so `/ws/interviews/{session_id}` will not appear in `/docs`. Use this README section for WebSocket usage.

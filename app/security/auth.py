@@ -1,4 +1,4 @@
-from fastapi import HTTPException, Request, status
+from fastapi import HTTPException, Request, WebSocket, status
 from app.core.config import settings
 from app.security.jwt_tokens import decode_token
 
@@ -41,3 +41,36 @@ async def authenticate_request(request: Request) -> None:
 
     request.state.api_key = api_key
     request.state.role = role
+
+
+def get_websocket_role(websocket: WebSocket) -> str | None:
+    if not settings.auth_enabled:
+        return "anonymous"
+
+    auth_header = websocket.headers.get("authorization")
+    if auth_header and auth_header.lower().startswith("bearer "):
+        token = auth_header.split(" ", 1)[1].strip()
+        if token:
+            try:
+                payload = decode_token(token)
+            except ValueError:
+                return None
+            if payload.get("type") == "access":
+                return payload.get("role")
+
+    api_key = websocket.headers.get(settings.auth_header)
+    if not api_key:
+        api_key = websocket.query_params.get("api_key")
+    if api_key:
+        return settings.api_keys.get(api_key)
+
+    token = websocket.query_params.get("token")
+    if token:
+        try:
+            payload = decode_token(token)
+        except ValueError:
+            return None
+        if payload.get("type") == "access":
+            return payload.get("role")
+
+    return None
