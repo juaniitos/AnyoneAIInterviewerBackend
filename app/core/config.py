@@ -54,6 +54,7 @@ class Settings(BaseModel):
     jwt_refresh_days: int = int(os.getenv("JWT_REFRESH_DAYS", "7"))
     users: dict[str, dict[str, str]] = _parse_users(os.getenv("USER_CREDENTIALS", ""))
     candidate_token_days: int = int(os.getenv("CANDIDATE_TOKEN_DAYS", "7"))
+    audio_upload_dir: str = os.getenv("AUDIO_UPLOAD_DIR", "/tmp/interview-audio")
 
 
 settings = Settings()
