@@ -53,6 +53,7 @@ class Settings(BaseModel):
     jwt_access_minutes: int = int(os.getenv("JWT_ACCESS_MINUTES", "30"))
     jwt_refresh_days: int = int(os.getenv("JWT_REFRESH_DAYS", "7"))
     users: dict[str, dict[str, str]] = _parse_users(os.getenv("USER_CREDENTIALS", ""))
+    candidate_token_days: int = int(os.getenv("CANDIDATE_TOKEN_DAYS", "7"))
 
 
 settings = Settings()

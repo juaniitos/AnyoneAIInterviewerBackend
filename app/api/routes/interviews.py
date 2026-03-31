@@ -3,28 +3,39 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, selectinload
 from app.api.deps import get_db
 from app import models, schemas
-from app.core.config import settings
-from app.services.question_generation import generate_questions
-from app.services.evaluation import evaluate_answer
 from app.security.rbac import require_roles
 
 router = APIRouter(prefix="/interviews", tags=["interviews"])
 
 
-def _get_next_question(db: Session, interview_id: int) -> models.InterviewQuestion | None:
+def _get_next_question(db: Session, session: models.InterviewSession) -> models.Question | None:
     answered_subq = (
-        db.query(models.Answer.interview_question_id)
-        .join(models.InterviewQuestion)
-        .filter(models.InterviewQuestion.interview_id == interview_id)
+        db.query(models.Answer.question_id)
+        .filter(models.Answer.session_id == session.id)
         .subquery()
     )
-    return (
-        db.query(models.InterviewQuestion)
-        .filter(models.InterviewQuestion.interview_id == interview_id)
-        .filter(~models.InterviewQuestion.id.in_(answered_subq))
-        .order_by(models.InterviewQuestion.order_index)
-        .first()
+    query = (
+        db.query(models.Question)
+        .filter(models.Question.job_role_id == session.job_role_id)
+        .filter(models.Question.is_active.is_(True))
+        .filter(~models.Question.id.in_(answered_subq))
+        .order_by(models.Question.id)
     )
+    if session.template and session.template.question_count:
+        query = query.limit(session.template.question_count)
+    return query.first()
+
+
+def _session_questions(db: Session, session: models.InterviewSession) -> list[models.Question]:
+    query = (
+        db.query(models.Question)
+        .filter(models.Question.job_role_id == session.job_role_id)
+        .filter(models.Question.is_active.is_(True))
+        .order_by(models.Question.id)
+    )
+    if session.template and session.template.question_count:
+        query = query.limit(session.template.question_count)
+    return query.all()
 
 
 @router.post(
@@ -38,53 +49,41 @@ def create_interview(payload: schemas.InterviewCreate, db: Session = Depends(get
     if not candidate:
         raise HTTPException(status_code=404, detail="Candidate not found")
 
-    if not payload.role_id and not payload.custom_role:
-        raise HTTPException(status_code=400, detail="role_id or custom_role is required")
+    job_role = db.query(models.JobRole).filter(models.JobRole.id == payload.job_role_id).first()
+    if not job_role:
+        raise HTTPException(status_code=404, detail="Job role not found")
 
-    interview = models.Interview(
-        candidate_id=payload.candidate_id,
-        role_id=payload.role_id,
-        custom_role=payload.custom_role,
-        skills=payload.skills,
-    )
-    db.add(interview)
-    db.flush()
-
-    question_count = payload.question_count or settings.default_question_count
-
-    if payload.role_id:
-        questions = (
-            db.query(models.QuestionBank)
-            .filter(models.QuestionBank.role_id == payload.role_id)
-            .order_by(models.QuestionBank.id)
-            .limit(question_count)
-            .all()
+    template = None
+    if payload.template_id:
+        template = (
+            db.query(models.InterviewTemplate)
+            .filter(models.InterviewTemplate.id == payload.template_id)
+            .first()
         )
-        if not questions:
-            raise HTTPException(status_code=400, detail="No questions for this role")
-        for index, q in enumerate(questions, start=1):
-            db.add(
-                models.InterviewQuestion(
-                    interview_id=interview.id,
-                    question_id=q.id,
-                    question_text=q.text,
-                    order_index=index,
-                )
-            )
+        if not template:
+            raise HTTPException(status_code=404, detail="Interview template not found")
+        if template.job_role_id != payload.job_role_id:
+            raise HTTPException(status_code=400, detail="Template does not match job role")
     else:
-        generated = generate_questions(payload.custom_role, payload.skills)
-        for index, text in enumerate(generated[:question_count], start=1):
-            db.add(
-                models.InterviewQuestion(
-                    interview_id=interview.id,
-                    question_text=text,
-                    order_index=index,
-                )
-            )
+        template = (
+            db.query(models.InterviewTemplate)
+            .filter(models.InterviewTemplate.job_role_id == payload.job_role_id)
+            .order_by(models.InterviewTemplate.name)
+            .first()
+        )
+        if not template:
+            raise HTTPException(status_code=400, detail="No interview template for this job role")
 
+    session = models.InterviewSession(
+        candidate_id=payload.candidate_id,
+        job_role_id=payload.job_role_id,
+        template_id=template.id,
+        status="pending",
+    )
+    db.add(session)
     db.commit()
-    db.refresh(interview)
-    return interview
+    db.refresh(session)
+    return session
 
 
 @router.get(
@@ -94,9 +93,8 @@ def create_interview(payload: schemas.InterviewCreate, db: Session = Depends(get
 )
 def list_interviews(db: Session = Depends(get_db)):
     return (
-        db.query(models.Interview)
-        .options(selectinload(models.Interview.questions))
-        .order_by(models.Interview.started_at.desc())
+        db.query(models.InterviewSession)
+        .order_by(models.InterviewSession.started_at.desc())
         .all()
     )
 
@@ -106,38 +104,35 @@ def list_interviews(db: Session = Depends(get_db)):
     response_model=schemas.InterviewDetail,
     dependencies=[Depends(require_roles("recruiter", "interviewer"))],
 )
-def get_interview(interview_id: int, db: Session = Depends(get_db)):
-    interview = (
-        db.query(models.Interview)
+def get_interview(interview_id: str, db: Session = Depends(get_db)):
+    session = (
+        db.query(models.InterviewSession)
         .options(
-            selectinload(models.Interview.questions),
-            selectinload(models.Interview.candidate),
-            selectinload(models.Interview.role),
+            selectinload(models.InterviewSession.candidate),
+            selectinload(models.InterviewSession.job_role),
+            selectinload(models.InterviewSession.template),
         )
-        .filter(models.Interview.id == interview_id)
+        .filter(models.InterviewSession.id == interview_id)
         .first()
     )
-    if not interview:
+    if not session:
         raise HTTPException(status_code=404, detail="Interview not found")
 
     answers = (
         db.query(models.Answer)
-        .join(models.InterviewQuestion)
-        .filter(models.InterviewQuestion.interview_id == interview_id)
+        .filter(models.Answer.session_id == interview_id)
         .order_by(models.Answer.created_at)
         .all()
     )
 
     return schemas.InterviewDetail(
-        id=interview.id,
-        candidate=interview.candidate,
-        role=interview.role,
-        custom_role=interview.custom_role,
-        skills=interview.skills,
-        status=interview.status,
-        started_at=interview.started_at,
-        finished_at=interview.finished_at,
-        questions=interview.questions,
+        id=session.id,
+        candidate=session.candidate,
+        job_role=session.job_role,
+        template=session.template,
+        status=session.status,
+        started_at=session.started_at,
+        ended_at=session.ended_at,
         answers=answers,
     )
 
@@ -147,48 +142,50 @@ def get_interview(interview_id: int, db: Session = Depends(get_db)):
     response_model=schemas.InterviewTranscript,
     dependencies=[Depends(require_roles("recruiter", "interviewer"))],
 )
-def get_interview_transcript(interview_id: int, db: Session = Depends(get_db)):
-    interview = (
-        db.query(models.Interview)
+def get_interview_transcript(interview_id: str, db: Session = Depends(get_db)):
+    session = (
+        db.query(models.InterviewSession)
         .options(
-            selectinload(models.Interview.candidate),
-            selectinload(models.Interview.role),
+            selectinload(models.InterviewSession.candidate),
+            selectinload(models.InterviewSession.job_role),
+            selectinload(models.InterviewSession.template),
         )
-        .filter(models.Interview.id == interview_id)
+        .filter(models.InterviewSession.id == interview_id)
         .first()
     )
-    if not interview:
+    if not session:
         raise HTTPException(status_code=404, detail="Interview not found")
 
     answers = (
-        db.query(models.Answer, models.InterviewQuestion)
-        .join(models.InterviewQuestion)
-        .filter(models.InterviewQuestion.interview_id == interview_id)
+        db.query(models.Answer, models.Question)
+        .join(models.Question, models.Answer.question_id == models.Question.id)
+        .filter(models.Answer.session_id == interview_id)
         .order_by(models.Answer.created_at)
         .all()
     )
 
     transcripts = [
         schemas.TranscriptItem(
-            interview_question_id=answer.interview_question_id,
-            question_text=question.question_text,
+            question_id=answer.question_id,
+            question_text=question.text,
+            question_number=answer.question_number,
             transcript=answer.transcript,
-            score=answer.score,
-            feedback=answer.feedback,
+            audio_url=answer.audio_url,
+            audio_duration_sec=answer.audio_duration_sec,
+            stt_confidence=answer.stt_confidence,
             created_at=answer.created_at,
         )
         for answer, question in answers
     ]
 
     return schemas.InterviewTranscript(
-        id=interview.id,
-        candidate=interview.candidate,
-        role=interview.role,
-        custom_role=interview.custom_role,
-        skills=interview.skills,
-        status=interview.status,
-        started_at=interview.started_at,
-        finished_at=interview.finished_at,
+        id=session.id,
+        candidate=session.candidate,
+        job_role=session.job_role,
+        template=session.template,
+        status=session.status,
+        started_at=session.started_at,
+        ended_at=session.ended_at,
         transcripts=transcripts,
     )
 
@@ -198,23 +195,30 @@ def get_interview_transcript(interview_id: int, db: Session = Depends(get_db)):
     response_model=schemas.InterviewSessionState,
     dependencies=[Depends(require_roles("interviewer"))],
 )
-def start_interview_session(interview_id: int, db: Session = Depends(get_db)):
-    interview = db.query(models.Interview).filter(models.Interview.id == interview_id).first()
-    if not interview:
+def start_interview_session(interview_id: str, db: Session = Depends(get_db)):
+    session = (
+        db.query(models.InterviewSession)
+        .options(selectinload(models.InterviewSession.template))
+        .filter(models.InterviewSession.id == interview_id)
+        .first()
+    )
+    if not session:
         raise HTTPException(status_code=404, detail="Interview not found")
 
-    if interview.status != "completed":
-        interview.status = "in_progress"
+    if session.status != "completed":
+        session.status = "in_progress"
+        if session.started_at is None:
+            session.started_at = datetime.utcnow()
         db.commit()
-        db.refresh(interview)
+        db.refresh(session)
 
-    next_question = _get_next_question(db, interview_id)
+    next_question = _get_next_question(db, session)
     is_complete = next_question is None
 
     return schemas.InterviewSessionState(
-        interview_id=interview.id,
-        status=interview.status,
-        question=next_question,
+        interview_id=session.id,
+        status=session.status,
+        question=schemas.SessionQuestion.model_validate(next_question) if next_question else None,
         is_complete=is_complete,
     )
 
@@ -224,18 +228,23 @@ def start_interview_session(interview_id: int, db: Session = Depends(get_db)):
     response_model=schemas.InterviewSessionState,
     dependencies=[Depends(require_roles("interviewer"))],
 )
-def get_next_question(interview_id: int, db: Session = Depends(get_db)):
-    interview = db.query(models.Interview).filter(models.Interview.id == interview_id).first()
-    if not interview:
+def get_next_question(interview_id: str, db: Session = Depends(get_db)):
+    session = (
+        db.query(models.InterviewSession)
+        .options(selectinload(models.InterviewSession.template))
+        .filter(models.InterviewSession.id == interview_id)
+        .first()
+    )
+    if not session:
         raise HTTPException(status_code=404, detail="Interview not found")
 
-    next_question = _get_next_question(db, interview_id)
+    next_question = _get_next_question(db, session)
     is_complete = next_question is None
 
     return schemas.InterviewSessionState(
-        interview_id=interview.id,
-        status=interview.status,
-        question=next_question,
+        interview_id=session.id,
+        status=session.status,
+        question=schemas.SessionQuestion.model_validate(next_question) if next_question else None,
         is_complete=is_complete,
     )
 
@@ -246,41 +255,54 @@ def get_next_question(interview_id: int, db: Session = Depends(get_db)):
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(require_roles("interviewer"))],
 )
-def submit_session_answer(interview_id: int, payload: schemas.AnswerCreate, db: Session = Depends(get_db)):
-    interview = db.query(models.Interview).filter(models.Interview.id == interview_id).first()
-    if not interview:
+def submit_session_answer(interview_id: str, payload: schemas.AnswerCreate, db: Session = Depends(get_db)):
+    session = (
+        db.query(models.InterviewSession)
+        .options(selectinload(models.InterviewSession.template))
+        .filter(models.InterviewSession.id == interview_id)
+        .first()
+    )
+    if not session:
         raise HTTPException(status_code=404, detail="Interview not found")
 
-    interview_question = (
-        db.query(models.InterviewQuestion)
+    questions = _session_questions(db, session)
+    question_map = {question.id: index + 1 for index, question in enumerate(questions)}
+    if payload.question_id not in question_map:
+        raise HTTPException(status_code=404, detail="Question not found for this interview")
+
+    existing = (
+        db.query(models.Answer)
         .filter(
-            models.InterviewQuestion.id == payload.interview_question_id,
-            models.InterviewQuestion.interview_id == interview_id,
+            models.Answer.session_id == interview_id,
+            models.Answer.question_id == payload.question_id,
         )
         .first()
     )
-    if not interview_question:
-        raise HTTPException(status_code=404, detail="Interview question not found")
+    if existing:
+        raise HTTPException(status_code=409, detail="Answer already submitted")
 
-    score, feedback = evaluate_answer(interview_question.question_text, payload.transcript)
+    question_number = payload.question_number or question_map[payload.question_id]
     answer = models.Answer(
-        interview_question_id=payload.interview_question_id,
+        session_id=interview_id,
+        question_id=payload.question_id,
+        question_number=question_number,
         transcript=payload.transcript,
-        score=score,
-        feedback=feedback,
+        audio_url=payload.audio_url,
+        audio_duration_sec=payload.audio_duration_sec,
+        stt_confidence=payload.stt_confidence,
     )
     db.add(answer)
     db.commit()
     db.refresh(answer)
 
-    next_question = _get_next_question(db, interview_id)
+    next_question = _get_next_question(db, session)
     is_complete = next_question is None
 
     return schemas.InterviewSessionAnswer(
         answer=answer,
-        next_question=next_question,
+        next_question=schemas.SessionQuestion.model_validate(next_question) if next_question else None,
         is_complete=is_complete,
-        status=interview.status,
+        status=session.status,
     )
 
 
@@ -289,15 +311,15 @@ def submit_session_answer(interview_id: int, payload: schemas.AnswerCreate, db: 
     response_model=schemas.InterviewRead,
     dependencies=[Depends(require_roles("interviewer"))],
 )
-def end_interview_session(interview_id: int, db: Session = Depends(get_db)):
-    interview = db.query(models.Interview).filter(models.Interview.id == interview_id).first()
-    if not interview:
+def end_interview_session(interview_id: str, db: Session = Depends(get_db)):
+    session = db.query(models.InterviewSession).filter(models.InterviewSession.id == interview_id).first()
+    if not session:
         raise HTTPException(status_code=404, detail="Interview not found")
-    interview.status = "completed"
-    interview.finished_at = datetime.utcnow()
+    session.status = "completed"
+    session.ended_at = datetime.utcnow()
     db.commit()
-    db.refresh(interview)
-    return interview
+    db.refresh(session)
+    return session
 
 
 @router.post(
@@ -306,28 +328,41 @@ def end_interview_session(interview_id: int, db: Session = Depends(get_db)):
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(require_roles("interviewer"))],
 )
-def submit_answer(interview_id: int, payload: schemas.AnswerCreate, db: Session = Depends(get_db)):
-    interview = db.query(models.Interview).filter(models.Interview.id == interview_id).first()
-    if not interview:
+def submit_answer(interview_id: str, payload: schemas.AnswerCreate, db: Session = Depends(get_db)):
+    session = (
+        db.query(models.InterviewSession)
+        .options(selectinload(models.InterviewSession.template))
+        .filter(models.InterviewSession.id == interview_id)
+        .first()
+    )
+    if not session:
         raise HTTPException(status_code=404, detail="Interview not found")
 
-    interview_question = (
-        db.query(models.InterviewQuestion)
+    questions = _session_questions(db, session)
+    question_map = {question.id: index + 1 for index, question in enumerate(questions)}
+    if payload.question_id not in question_map:
+        raise HTTPException(status_code=404, detail="Question not found for this interview")
+
+    existing = (
+        db.query(models.Answer)
         .filter(
-            models.InterviewQuestion.id == payload.interview_question_id,
-            models.InterviewQuestion.interview_id == interview_id,
+            models.Answer.session_id == interview_id,
+            models.Answer.question_id == payload.question_id,
         )
         .first()
     )
-    if not interview_question:
-        raise HTTPException(status_code=404, detail="Interview question not found")
+    if existing:
+        raise HTTPException(status_code=409, detail="Answer already submitted")
 
-    score, feedback = evaluate_answer(interview_question.question_text, payload.transcript)
+    question_number = payload.question_number or question_map[payload.question_id]
     answer = models.Answer(
-        interview_question_id=payload.interview_question_id,
+        session_id=interview_id,
+        question_id=payload.question_id,
+        question_number=question_number,
         transcript=payload.transcript,
-        score=score,
-        feedback=feedback,
+        audio_url=payload.audio_url,
+        audio_duration_sec=payload.audio_duration_sec,
+        stt_confidence=payload.stt_confidence,
     )
     db.add(answer)
     db.commit()
@@ -340,12 +375,12 @@ def submit_answer(interview_id: int, payload: schemas.AnswerCreate, db: Session 
     response_model=schemas.InterviewRead,
     dependencies=[Depends(require_roles("interviewer"))],
 )
-def finish_interview(interview_id: int, db: Session = Depends(get_db)):
-    interview = db.query(models.Interview).filter(models.Interview.id == interview_id).first()
-    if not interview:
+def finish_interview(interview_id: str, db: Session = Depends(get_db)):
+    session = db.query(models.InterviewSession).filter(models.InterviewSession.id == interview_id).first()
+    if not session:
         raise HTTPException(status_code=404, detail="Interview not found")
-    interview.status = "completed"
-    interview.finished_at = datetime.utcnow()
+    session.status = "completed"
+    session.ended_at = datetime.utcnow()
     db.commit()
-    db.refresh(interview)
-    return interview
+    db.refresh(session)
+    return session

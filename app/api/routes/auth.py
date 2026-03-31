@@ -13,7 +13,7 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 class LoginRequest(BaseModel):
-    username: str
+    email: str
     password: str
 
 
@@ -29,20 +29,20 @@ class RefreshRequest(BaseModel):
 
 @router.post("/login", response_model=TokenResponse)
 def login(payload: LoginRequest, db: Session = Depends(get_db)):
-    db_user = db.query(models.User).filter(models.User.username == payload.username).first()
+    db_user = db.query(models.AdminUser).filter(models.AdminUser.email == payload.email).first()
     if db_user:
         if not pwd_context.verify(payload.password, db_user.password_hash):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
-        access = create_access_token(payload.username, db_user.role)
-        refresh = create_refresh_token(payload.username, db_user.role)
+        access = create_access_token(payload.email, "admin")
+        refresh = create_refresh_token(payload.email, "admin")
         return TokenResponse(access_token=access, refresh_token=refresh)
 
-    env_user = settings.users.get(payload.username)
+    env_user = settings.users.get(payload.email)
     if not env_user or env_user["password"] != payload.password:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
-    access = create_access_token(payload.username, env_user["role"])
-    refresh = create_refresh_token(payload.username, env_user["role"])
+    access = create_access_token(payload.email, env_user["role"])
+    refresh = create_refresh_token(payload.email, env_user["role"])
     return TokenResponse(access_token=access, refresh_token=refresh)
 
 
@@ -66,17 +66,20 @@ def refresh(payload: RefreshRequest):
     return TokenResponse(access_token=access, refresh_token=refresh_token)
 
 
-@router.post("/signup", response_model=schemas.UserRead, status_code=status.HTTP_201_CREATED)
-def signup(payload: schemas.UserCreate, db: Session = Depends(get_db)):
-    existing = db.query(models.User).filter(models.User.username == payload.username).first()
+@router.post("/signup", response_model=schemas.AdminUserRead, status_code=status.HTTP_201_CREATED)
+def signup(payload: schemas.AdminUserCreate, db: Session = Depends(get_db)):
+    existing = db.query(models.AdminUser).filter(models.AdminUser.email == payload.email).first()
     if existing:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username already exists")
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already exists")
 
-    role = payload.role or "recruiter"
     password_hash = pwd_context.hash(payload.password)
-
-    user = models.User(username=payload.username, password_hash=password_hash, role=role)
-    db.add(user)
+    admin_user = models.AdminUser(
+        email=payload.email,
+        password_hash=password_hash,
+        name=payload.name,
+        is_active=True,
+    )
+    db.add(admin_user)
     db.commit()
-    db.refresh(user)
-    return user
+    db.refresh(admin_user)
+    return admin_user

@@ -5,80 +5,101 @@ from pydantic import BaseModel, EmailStr, Field
 class RoleCreate(BaseModel):
     name: str
     description: str | None = None
+    seniority: str | None = None
+    department: str | None = None
+    skills_required: list[str] | None = None
 
 
 class RoleRead(RoleCreate):
-    id: int
-
-    class Config:
-        from_attributes = True
-
-
-class QuestionCreate(BaseModel):
-    role_id: int | None = None
-    text: str
-    category: str | None = None
-
-
-class QuestionRead(QuestionCreate):
-    id: int
-
-    class Config:
-        from_attributes = True
-
-
-class CandidateCreate(BaseModel):
-    first_name: str
-    last_name: str
-    email: EmailStr
-
-
-class CandidateRead(CandidateCreate):
-    id: int
+    id: str
     created_at: datetime
 
     class Config:
         from_attributes = True
 
 
-class InterviewCreate(BaseModel):
-    candidate_id: int
-    role_id: int | None = None
-    custom_role: str | None = None
-    skills: str | None = None
-    question_count: int | None = Field(default=None, ge=1, le=20)
+class QuestionCreate(BaseModel):
+    job_role_id: str
+    text: str
+    category: str
+    difficulty: str
+    embedding: list[float] | None = None
+    is_active: bool | None = True
 
 
-class InterviewUpdate(BaseModel):
-    candidate_id: int | None = None
-    role_id: int | None = None
-    custom_role: str | None = None
-    skills: str | None = None
-    status: str | None = None
-    finished_at: datetime | None = None
-
-
-class InterviewQuestionRead(BaseModel):
-    id: int
-    question_id: int | None = None
-    question_text: str
-    order_index: int
+class QuestionRead(QuestionCreate):
+    id: str
 
     class Config:
         from_attributes = True
 
 
+class CandidateCreate(BaseModel):
+    full_name: str
+    email: EmailStr
+    phone: str | None = None
+    cv_summary: str | None = None
+    skills: list[str] | None = None
+    years_experience: int | None = None
+
+
+class CandidateRead(CandidateCreate):
+    id: str
+    access_token: str
+    token_expires_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class InterviewTemplateCreate(BaseModel):
+    job_role_id: str
+    name: str
+    question_count: int = Field(ge=1, le=50)
+    max_time_per_question_sec: int | None = None
+    system_prompt: str
+    evaluation_criteria: str | None = None
+
+
+class InterviewTemplateRead(InterviewTemplateCreate):
+    id: str
+
+    class Config:
+        from_attributes = True
+
+
+class InterviewCreate(BaseModel):
+    candidate_id: str
+    job_role_id: str
+    template_id: str | None = None
+
+
+class InterviewUpdate(BaseModel):
+    candidate_id: str | None = None
+    job_role_id: str | None = None
+    template_id: str | None = None
+    status: str | None = None
+    ended_at: datetime | None = None
+
+
 class AnswerCreate(BaseModel):
-    interview_question_id: int
+    question_id: str
     transcript: str
+    question_number: int | None = None
+    audio_url: str | None = None
+    audio_duration_sec: float | None = None
+    stt_confidence: float | None = None
 
 
 class AnswerRead(BaseModel):
-    id: int
-    interview_question_id: int
+    id: str
+    session_id: str
+    question_id: str
+    question_number: int
     transcript: str
-    score: int | None = None
-    feedback: str | None = None
+    audio_url: str | None = None
+    audio_duration_sec: float | None = None
+    stt_confidence: float | None = None
     created_at: datetime
 
     class Config:
@@ -86,30 +107,26 @@ class AnswerRead(BaseModel):
 
 
 class InterviewRead(BaseModel):
-    id: int
-    candidate_id: int
-    role_id: int | None = None
-    custom_role: str | None = None
-    skills: str | None = None
+    id: str
+    candidate_id: str
+    job_role_id: str
+    template_id: str
     status: str
-    started_at: datetime
-    finished_at: datetime | None = None
-    questions: list[InterviewQuestionRead] = []
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
 
     class Config:
         from_attributes = True
 
 
 class InterviewDetail(BaseModel):
-    id: int
+    id: str
     candidate: CandidateRead
-    role: RoleRead | None = None
-    custom_role: str | None = None
-    skills: str | None = None
+    job_role: RoleRead
+    template: InterviewTemplateRead
     status: str
-    started_at: datetime
-    finished_at: datetime | None = None
-    questions: list[InterviewQuestionRead] = []
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
     answers: list[AnswerRead] = []
 
     class Config:
@@ -117,53 +134,65 @@ class InterviewDetail(BaseModel):
 
 
 class TranscriptItem(BaseModel):
-    interview_question_id: int
+    question_id: str
     question_text: str
+    question_number: int
     transcript: str
-    score: int | None = None
-    feedback: str | None = None
+    audio_url: str | None = None
+    audio_duration_sec: float | None = None
+    stt_confidence: float | None = None
     created_at: datetime
 
 
 class InterviewTranscript(BaseModel):
-    id: int
+    id: str
     candidate: CandidateRead
-    role: RoleRead | None = None
-    custom_role: str | None = None
-    skills: str | None = None
+    job_role: RoleRead
+    template: InterviewTemplateRead
     status: str
-    started_at: datetime
-    finished_at: datetime | None = None
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
     transcripts: list[TranscriptItem] = []
 
     class Config:
         from_attributes = True
 
 
+class SessionQuestion(BaseModel):
+    id: str
+    text: str
+    category: str
+    difficulty: str
+
+    class Config:
+        from_attributes = True
+
+
 class InterviewSessionState(BaseModel):
-    interview_id: int
+    interview_id: str
     status: str
-    question: InterviewQuestionRead | None = None
+    question: SessionQuestion | None = None
     is_complete: bool
 
 
 class InterviewSessionAnswer(BaseModel):
     answer: AnswerRead
-    next_question: InterviewQuestionRead | None = None
+    next_question: SessionQuestion | None = None
     is_complete: bool
     status: str
 
 
-class UserCreate(BaseModel):
-    username: str
+class AdminUserCreate(BaseModel):
+    email: EmailStr
     password: str
-    role: str | None = None
+    name: str
 
 
-class UserRead(BaseModel):
-    id: int
-    username: str
-    role: str
+class AdminUserRead(BaseModel):
+    id: str
+    email: EmailStr
+    name: str
+    is_active: bool
     created_at: datetime
 
     class Config:
