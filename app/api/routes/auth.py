@@ -9,7 +9,8 @@ from app.security.jwt_tokens import create_access_token, create_refresh_token, d
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Use bcrypt_sha256 to avoid bcrypt's 72-byte password limit while remaining compatible
+pwd_context = CryptContext(schemes=["bcrypt_sha256", "bcrypt"], deprecated="auto")
 
 
 class LoginRequest(BaseModel):
