@@ -5,6 +5,12 @@ from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON, TypeDecorator
 from app.db.base import Base
+from app.core.config import settings
+
+try:
+    from pgvector.sqlalchemy import Vector
+except ImportError:  # pragma: no cover
+    Vector = None  # type: ignore[assignment]
 
 
 def uuid_str() -> str:
@@ -26,6 +32,8 @@ class FloatArray(TypeDecorator):
     cache_ok = True
 
     def load_dialect_impl(self, dialect):
+        if dialect.name == "postgresql" and Vector is not None:
+            return dialect.type_descriptor(Vector(settings.embedding_dimension))
         if dialect.name == "postgresql":
             return dialect.type_descriptor(ARRAY(Float()))
         return dialect.type_descriptor(JSON())
@@ -114,6 +122,13 @@ class InterviewSession(Base):
     job_role_id: Mapped[str] = mapped_column(ForeignKey("job_roles.id"), index=True)
     template_id: Mapped[str] = mapped_column(ForeignKey("interview_templates.id"), index=True)
     status: Mapped[str] = mapped_column(String(20), default="pending")
+    current_question_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    current_question_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    current_question_index: Mapped[int] = mapped_column(Integer, default=0)
+    clarification_count: Mapped[int] = mapped_column(Integer, default=0)
+    skip_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_intent: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    graph_state_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 

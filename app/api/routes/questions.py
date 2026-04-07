@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_db
 from app import models, schemas
 from app.security.rbac import require_roles
+from app.services.semantic_questions import ensure_question_embedding
 
 router = APIRouter(
     prefix="/questions",
@@ -24,6 +25,8 @@ def create_question(payload: schemas.QuestionCreate, db: Session = Depends(get_d
         embedding=payload.embedding,
         is_active=payload.is_active if payload.is_active is not None else True,
     )
+    if not question.embedding:
+        ensure_question_embedding(question, job_role)
     db.add(question)
     db.commit()
     db.refresh(question)

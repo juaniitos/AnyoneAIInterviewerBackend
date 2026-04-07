@@ -1,5 +1,5 @@
 from datetime import datetime
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 class RoleCreate(BaseModel):
@@ -128,6 +128,7 @@ class InterviewDetail(BaseModel):
     started_at: datetime | None = None
     ended_at: datetime | None = None
     answers: list[AnswerRead] = []
+    evaluation: "EvaluationRead | None" = None
 
     class Config:
         from_attributes = True
@@ -197,3 +198,135 @@ class AdminUserRead(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class PublicJobSummary(BaseModel):
+    id: str
+    title: str
+    department: str | None = None
+    description: str | None = None
+    seniority: str | None = None
+    location: str = "Remote / Hybrid"
+    employment_type: str = "Full-time"
+    salary_range: str = "Competitive"
+    skills_required: list[str] = []
+    posted_time: str = "Recently added"
+    ai_insight: str | None = None
+
+
+class PublicJobDetail(PublicJobSummary):
+    question_count: int = 0
+    mission_highlight: str
+    responsibilities: list[str] = []
+    technical_core: str
+    design_literacy: str
+    benefits: list[dict[str, str]] = []
+
+
+class PublicApplicationCreate(BaseModel):
+    job_role_id: str
+    full_name: str
+    email: EmailStr
+    phone: str | None = None
+    cv_summary: str | None = None
+    skills: list[str] | None = None
+    years_experience: int | None = None
+    interview_language: str | None = "en"
+
+
+class PublicApplicationResponse(BaseModel):
+    candidate: CandidateRead
+    interview: InterviewRead
+    interview_token: str
+
+
+class PublicInterviewState(BaseModel):
+    interview_id: str
+    candidate_name: str
+    job_title: str
+    status: str
+    interview_language: str = "en"
+    current_question: SessionQuestion | None = None
+    total_questions: int
+    answered_questions: int
+    clarification_count: int = 0
+    skip_count: int = 0
+    is_complete: bool
+
+
+class EvaluationRead(BaseModel):
+    model_config = ConfigDict(
+        protected_namespaces=(),
+        from_attributes=True,
+    )
+
+    id: str
+    session_id: str
+    score: float
+    summary: str
+    strengths: str | None = None
+    areas_of_improvement: str | None = None
+    recommendation: str
+    model_used: str
+    reviewed_by: str | None = None
+    evaluated_at: datetime
+
+class PublicInterviewResult(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    interview: InterviewRead
+    evaluation: EvaluationRead
+    transcript: InterviewTranscript
+
+
+class InterviewTurnRequest(BaseModel):
+    question_id: str
+    intent: str = Field(pattern="^(answer|clarify|skip|pass|idk)$")
+    utterance: str | None = None
+    question_number: int | None = None
+    interview_language: str | None = None
+    audio_url: str | None = None
+    audio_duration_sec: float | None = None
+    stt_confidence: float | None = None
+
+
+class InterviewTurnResponse(BaseModel):
+    event_type: str
+    message: str
+    status: str
+    interview_language: str = "en"
+    current_question: SessionQuestion | None = None
+    answered_questions: int
+    total_questions: int
+    candidate_answer_saved: bool = False
+    evaluation: dict | None = None
+    is_complete: bool = False
+
+
+class InterviewSocketEvent(BaseModel):
+    type: str
+    interview_language: str = "en"
+    status: str | None = None
+    message: str | None = None
+    current_question: SessionQuestion | None = None
+    answered_questions: int | None = None
+    total_questions: int | None = None
+    candidate_answer_saved: bool = False
+    evaluation: dict | None = None
+    transcript: str | None = None
+    question_id: str | None = None
+    audio_format: str | None = None
+    is_complete: bool = False
+
+
+class AdminInterviewSummary(BaseModel):
+    id: str
+    status: str
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
+    candidate_name: str
+    candidate_email: EmailStr
+    role_name: str
+    score: float | None = None
+    recommendation: str | None = None
+    answers_count: int = 0

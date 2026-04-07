@@ -2,7 +2,7 @@ from fastapi import HTTPException, Request, WebSocket, status
 from app.core.config import settings
 from app.security.jwt_tokens import decode_token
 
-PUBLIC_PATH_PREFIXES = ("/docs", "/redoc")
+PUBLIC_PATH_PREFIXES = ("/docs", "/redoc", "/public")
 PUBLIC_PATHS = {"/health", "/openapi.json", "/auth/login", "/auth/refresh", "/auth/signup"}
 
 
