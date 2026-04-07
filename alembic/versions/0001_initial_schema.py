@@ -7,6 +7,7 @@ Create Date: 2026-04-07 11:30:00
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 try:
     from pgvector.sqlalchemy import Vector
