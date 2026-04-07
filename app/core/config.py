@@ -80,6 +80,7 @@ class Settings(BaseModel):
         for origin in os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",")
         if origin.strip()
     ]
+    allowed_origin_regex: str | None = os.getenv("ALLOWED_ORIGIN_REGEX") or None
 
 
 settings = Settings()
