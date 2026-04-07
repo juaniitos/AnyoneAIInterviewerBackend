@@ -66,6 +66,10 @@ def create_app() -> FastAPI:
     app.include_router(public.router)
     app.include_router(voice.router)
 
+    @app.get("/")
+    def root():
+        return {"service": settings.app_name, "status": "ok", "health": "/health", "docs": "/docs", "public_jobs": "/public/jobs"}
+
     @app.get("/health")
     def health_check():
         return {"status": "ok"}

@@ -3,7 +3,7 @@ from app.core.config import settings
 from app.security.jwt_tokens import decode_token
 
 PUBLIC_PATH_PREFIXES = ("/docs", "/redoc", "/public")
-PUBLIC_PATHS = {"/health", "/openapi.json", "/auth/login", "/auth/refresh", "/auth/signup"}
+PUBLIC_PATHS = {"/", "/health", "/openapi.json", "/auth/login", "/auth/refresh", "/auth/signup"}
 
 
 def _is_public_path(path: str) -> bool:
